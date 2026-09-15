@@ -1,0 +1,51 @@
+[project]
+name = "export-racket-onnx"
+version = "0.1.0"
+description = "One-time tool: export RacketVision's RTMDet/RTMPose racket checkpoints to ONNX via mmdeploy."
+requires-python = "==3.10.*"
+dependencies = [
+    "torch==2.1.2",
+    "torchvision==0.16.2",
+    "mmengine>=0.10.7",
+    "mmdet>=3.0,<3.3",
+    "mmpose>=1.1",
+    "onnx>=1.16",
+    "onnxruntime>=1.19",
+    "openmim",
+    # torch 2.1.2 was built against numpy 1.x; RacketVision's own README pins numpy<2 for the same
+    # reason (mmcv/torch numpy-ABI mismatch otherwise: "_ARRAY_API not found").
+    "numpy>=1.23,<2",
+    # mmpose.apis imports the legacy pkg_resources module at load time; modern setuptools (>=81 or so)
+    # dropped it in favor of importlib.metadata. Pin an older setuptools that still ships it.
+    "setuptools<81",
+    "mmcv==2.1.0",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+mmcv = { index = "openmmlab-mmcv-cpu-torch21" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "openmmlab-mmcv-cpu-torch21"
+url = "https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html"
+format = "flat"
+explicit = true
+
+[tool.uv.extra-build-dependencies]
+# chumpy (mmpose's SMPL-related transitive dep) has a legacy setup.py that does `import pip` at build
+# time; uv's isolated build env doesn't include pip by default.
+chumpy = ["pip"]
+
+# CPU-only torch/torchvision on purpose: this env exists solely to run a one-time ONNX export, never
+# for real inference (that happens back in the main env via onnxruntime). CPU sidesteps RacketVision's
+# own documented "mmcv may fail to build/match on CUDA>=12.8" risk entirely — we never touch the host's
+# CUDA 13 driver from here. mmcv itself is installed separately below (mim's CUDA auto-detection picks
+# the wrong wheel index when torch is CPU-only), and mmdeploy is installed from its GitHub repo since it
+# has no CPU-only PyPI release compatible with this combination — see README.md in this directory for
+# the exact commands and any version drift discovered while running them.

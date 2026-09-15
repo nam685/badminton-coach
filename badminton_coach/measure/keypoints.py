@@ -110,13 +110,14 @@ RACKET_HANDLE = RACKET_IDX["handle"]
 RACKET_LEFT = RACKET_IDX["left"]
 RACKET_RIGHT = RACKET_IDX["right"]
 
-# Cosmetic only (used for optional debug/render overlays, never for metrics — those use raw keypoint
-# coordinates directly): a plausible racket-frame skeleton, not lifted verbatim from RacketVision's
-# internal skeleton_info (not published in the config we could inspect).
+# Verified 2026-09-15 against RacketVision's actual inference config
+# (data/models/racketvision/src/source/RacketPose/configs/pose/rtmpose_m_racket_infer.py `skeleton_info`).
 RACKET_SKELETON_EDGES: list[tuple[int, int]] = [
-    (RACKET_HANDLE, RACKET_BOTTOM),
+    (RACKET_TOP, RACKET_LEFT),
+    (RACKET_TOP, RACKET_RIGHT),
     (RACKET_BOTTOM, RACKET_LEFT),
     (RACKET_BOTTOM, RACKET_RIGHT),
-    (RACKET_LEFT, RACKET_TOP),
-    (RACKET_RIGHT, RACKET_TOP),
+    (RACKET_BOTTOM, RACKET_HANDLE),
+    (RACKET_BOTTOM, RACKET_TOP),
+    (RACKET_LEFT, RACKET_RIGHT),
 ]
