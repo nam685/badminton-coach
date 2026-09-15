@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<title>{{ run_name }}</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #111; color: #eee; }
+  h1, h2, h3 { color: #fff; }
+  video { width: 100%; max-width: 800px; border-radius: 8px; }
+  .finding { border-left: 4px solid #d33; padding: 0.5rem 1rem; margin: 1rem 0; background: #1c1c1c; border-radius: 4px; }
+  .finding h3 { margin-top: 0; }
+  .strengths { border-left: 4px solid #3a3; padding: 0.5rem 1rem; background: #1c1c1c; border-radius: 4px; }
+  .meta { color: #999; font-size: 0.9em; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #333; padding: 0.3rem 0.6rem; text-align: left; font-size: 0.9em; }
+  th { background: #222; }
+  details { margin: 1rem 0; background: #1c1c1c; padding: 0.5rem 1rem; border-radius: 4px; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 0.8em; color: #aaa; max-height: 400px; overflow-y: auto; }
+  .plot { max-width: 100%; margin: 0.5rem 0; }
+</style>
+</head>
+<body>
+<h1>{{ run_name }}</h1>
+
+{% if has_video %}
+<video controls><source src="annotated.mp4" type="video/mp4"></video>
+{% endif %}
+
+{% if findings %}
+  {% if not findings.measurement_quality.ok %}
+  <p><strong>⚠ {{ t("measurement_quality") }}:</strong> {{ findings.measurement_quality.notes }}</p>
+  {% endif %}
+
+  {% if findings.progress_vs_history %}
+  <p><strong>{{ t("progress") }}:</strong> {{ findings.progress_vs_history }}</p>
+  {% endif %}
+
+  {% if findings.strengths %}
+  <div class="strengths">
+    <strong>{{ t("strengths") }}:</strong>
+    <ul>{% for s in findings.strengths %}<li>{{ s }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <h2>{{ t("findings") }}</h2>
+  {% for fid in findings.priority %}
+    {% for f in findings.findings %}
+      {% if f.id == fid %}
+      <div class="finding">
+        <h3>{{ f.title }}</h3>
+        <p class="meta">{{ f.category }} · {{ t("severity") }} {{ f.severity }} · {{ t("pattern") }}: {{ f.pattern }}</p>
+        <p>{{ f.explanation }}</p>
+        <p><strong>{{ t("cue") }}:</strong> {{ f.cue }}</p>
+        <p><strong>{{ t("drill") }}:</strong> {{ f.drill }}</p>
+        <p class="meta">{{ t("evidence") }}: {{ f.evidence.visual }}</p>
+      </div>
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+{% else %}
+  <p>The judge did not produce findings for this run.</p>
+{% endif %}
+
+{% for swing in swings %}
+<h2>{{ t("swing") }} {{ swing.index }} ({{ t(swing.mode) }})</h2>
+<img class="plot" src="plots/swing_{{ swing.index }}.png" alt="swing {{ swing.index }} plot" loading="lazy">
+{% endfor %}
+
+{% if metrics %}
+<h2>{{ t("metrics") }}</h2>
+<table>
+<tr><th>{{ t("swings") }}</th><th>metric</th><th>{{ t("value") }}</th><th>{{ t("reference") }}</th></tr>
+{% for swing in metrics.swings %}
+  {% for name, mv in swing.metrics.items() %}
+    {% if mv.value is not none %}
+    <tr><td>{{ swing.index }}</td><td>{{ name }}</td><td>{{ "%.2f"|format(mv.value) }}</td>
+        <td>{% if mv.ref_mean is not none %}{{ "%.2f"|format(mv.ref_mean) }}{% else %}—{% endif %}</td></tr>
+    {% endif %}
+  {% endfor %}
+{% endfor %}
+</table>
+{% endif %}
+
+{% if stream_text %}
+<details>
+<summary>{{ t("judge_transcript") }}</summary>
+<pre>{{ stream_text }}</pre>
+</details>
+{% endif %}
+
+</body>
+</html>
