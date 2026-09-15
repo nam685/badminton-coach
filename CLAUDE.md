@@ -18,6 +18,15 @@ Claude judge it (`claude -p` agent in a per-run workspace), render an annotated 
 - `data/` is gitignored: models, reference clips, player runs. Never commit videos or weights.
 - Run dir layout is fixed by spec §7 (`data/players/<player>/<timestamp>/…`) — ticket 2 builds on it.
 
+## After editing badminton_coach/
+- Re-run `uv tool install --editable .` is NOT needed for code changes (editable install already
+  reflects them), but IS needed once if you haven't installed it yet — the judge agent invokes
+  `badminton-coach frames` by bare command name from its own workspace directory (not the repo root),
+  so it must be on `PATH` globally, not just runnable via `uv run` from here. See README.md.
+- After touching `track.py`, `ingest.py`, or anything the judge reads, sanity-check against real data if
+  you have any — several real bugs (wrong-player tracking, relative-path persistence) were only caught
+  by an actual judge run, not by unit tests on synthetic data. See `docs/judge-eval-template.md`.
+
 ## Rule of thumb
 - At every step, if difficulty or approach is uncertain, first ask "has someone already solved this?" — search
   before building; prefer maintained existing solutions. See **Prior art** notes in the plan.

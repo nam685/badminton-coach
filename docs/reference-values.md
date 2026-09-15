@@ -140,3 +140,38 @@ manual-check step is done.
   direction if it recurs: require a minimum *absolute* peak speed in addition to prominence, and/or
   cross-check against a large elbow-angle change over the same window (a real swing extends the arm; a
   foot-plant jitter doesn't).
+
+## Task 8 — judge (2026-09-15)
+
+- **First real end-to-end run**: full pipeline through metrics (no body3d/references, for speed) against
+  the test fixture, then a genuine `claude -p` call billed against the real subscription OAuth token —
+  the first time the whole chain, including the actual judge call, ran together. Full narrative in
+  `docs/judge-eval-template.md`; summary here per the usual per-task log.
+- **Outcome was correct, not a pass**: the judge reported `measurement_quality.ok = false`, 0 findings,
+  `confidence: "low"`, having noticed the skeleton overlay was drawn on a different person than the one
+  actually swinging, and specifically named a mid-swing identity switch as the cause of an impossible
+  metric (`contact_height_vs_nose = -0.98`). This validated the system prompt's "say so if measurement
+  looks broken" rule working as designed, and incidentally worked as an integration-test oracle: it
+  surfaced three real bugs that no synthetic-data unit test had caught.
+- **Real bug found and fixed in `track.py`**: player selection locked onto a static bystander (also
+  holding a racket) instead of the swinger, because the racket-proximity score couldn't distinguish
+  "calmly holding" from "swinging," and continuity's stickiness then preserved a bad early pick. Fixed
+  with a racket-motion signal that boosts the score of a candidate whose nearest racket head is actually
+  moving, a continuity floor that relaxes when that signal is decisive, and a post-hoc majority-vote pass
+  (`_stabilize_selection`) that cleans up isolated single-frame flips. Verified against the real
+  persisted data (chosen-player array compared before/after) and with a new unit test
+  (`test_select_player_prefers_swinging_racket_over_static_one`). Improved, not fully solved: a small
+  residual block of frames right around the fastest motion can still pick wrong — documented as a known
+  limitation in `track.py`'s module docstring, not silently claimed as fixed.
+- **Real bug found and fixed in `ingest.py`**: `normalized_path` was persisted exactly as given, so it
+  only resolved from whatever cwd `ingest()` happened to run in. Broke `badminton-coach frames` when the
+  judge (correctly) invoked it from its own workspace directory. Fixed by resolving all input paths to
+  absolute before anything is persisted; regression test
+  `test_ingest_stores_absolute_path_even_when_given_relative`.
+- **Real bug found and fixed in packaging**: `badminton-coach` wasn't on `PATH` outside the project's own
+  `uv run` at all, so the judge's `Bash(badminton-coach frames:*)` tool call had nothing to run
+  regardless of the path bug above. Fixed with `uv tool install --editable .`, now a required setup step
+  (`README.md`, `CLAUDE.md`).
+- **Not yet exercised**: genuine technique findings from correctly-tracked data — this run's
+  `measurement_quality.ok=false` short-circuited before reaching that path. Next real-footage run
+  (ideally with body3d and a reference clip) should cover it.
