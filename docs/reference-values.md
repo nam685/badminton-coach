@@ -43,3 +43,50 @@ manual-check step is done.
   composite as first guessed from Task 3's images alone) — one player prepping in the foreground, another
   executing the clear in the background. Confirms Task 6 (player selection) is not optional even on
   "clean" single-camera-position footage.
+
+## Task 5 — shuttle tracking / TrackNetV3 (2026-09-15)
+
+- **Real bug found and fixed**: at the model's default `batch_size=20`, GPU memory sat at ~3.9/4.0GB and
+  the run didn't error but appeared to hang (100% GPU util, no progress for minutes) — this is CUDA
+  unified-memory paging thrashing near the VRAM ceiling rather than a clean allocation failure. Fixed by
+  lowering the default `batch_size` to 8 (measured ~2.5GB peak) and adding an explicit
+  `torch.cuda.OutOfMemoryError` handler that halves the batch size and, failing that, falls back to CPU.
+  Confirmed fast (well under a minute) after the fix.
+- **Low recall on the fixture**: only **1.5% of frames (3/199)** crossed the visibility threshold
+  (confidence > 0.5), even though a shuttle is visibly present to the eye at several points (confirmed by
+  manually inspecting a cropped frame). Diagnostic sweep of the raw (pre-threshold) heatmap max
+  confidence across the clip showed it consistently low (0.08–0.43) with no clear spike — a real
+  recall/domain-gap limitation on this footage, not a code bug (the same code path, math, and threshold
+  as upstream `BallInferencer`; verified the model architecture and checkpoint loading independently).
+  Plausible contributors: our per-clip median background (vs. RacketVision's dedicated empty-court
+  captures), this footage's blur/compression, or a genuine domain gap from the training distribution.
+  **This is exactly the risk the spec already flagged and already designed around** (§10: "shuttle
+  tracking on amateur footage may be poor → contact falls back to racket-speed peak" and the shadow/live
+  swing distinction in §3.4) — no pipeline change needed now; Task 11 calibration (with more/varied real
+  footage) should revisit the confidence threshold and consider whether a court-specific median capture
+  (rather than per-clip) helps, but that's a tuning question, not a correctness one.
+- Unaffected: keypoint math, CSV schema, and caching all verified independently via unit tests + the
+  real-checkpoint integration test.
+- **CPU fallback is genuinely slow in this environment**: ~200 frames took several minutes on CPU
+  (vs. seconds on GPU) — plausibly WSL2 CPU-virtualization overhead, not investigated further since
+  latency isn't a concern for the rare real fallback case. Kept the fixture-based integration test on
+  `device="cuda"` for a sane dev-loop runtime; the CPU code path itself is covered separately by a cheap
+  synthetic 2-frame-clip test.
+
+## Task 6 — tracking / smoothing / handedness / net direction (2026-09-15)
+
+- **Real bug found and fixed**: the first draft of the player-selection score normalized "distance to
+  the nearest racket handle" by *each candidate's own* torso length. That inverted the intended effect
+  in the exact scenario the spec calls out (a bystander who appears larger/closer than the real player):
+  a bigger candidate's bigger torso shrinks their relative distance-in-torso-lengths to *any* racket,
+  including one held by someone else, letting them out-score the actual racket-holder on area alone.
+  Fixed with a steep three-tier gate (holding / ambiguous / clearly-not-holding) instead of a smooth
+  1/(1+d) falloff — "is this candidate holding the visible racket" is close to a binary fact and should
+  score like one. Caught by a synthetic test built directly from the spec's own motivating scenario.
+- **Real bug found and fixed**: `track()`'s cache-input-hash used Python's built-in `hash()` on the
+  measurement arrays' bytes, which is randomized per-process (`PYTHONHASHSEED`) unless explicitly
+  disabled — meaning the stage would never recognize its own previous output as cached across separate
+  runs (always silently recomputing). Replaced with `hashlib.sha256`, matching every other stage in the
+  codebase; grepped the rest of the package to confirm no other stage had the same mistake.
+- Both bugs were caught before ever running against real data, by the unit tests written per the plan's
+  own listed test scenarios — evidence those scenarios were worth specifying.
