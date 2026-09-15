@@ -105,12 +105,15 @@ manual-check step is done.
   hit. Added `speed_source` to `SwingsFile` itself (previously only recorded in `run.json`'s internal
   stage bookkeeping) so the cached path reconstructs an identical summary from the on-disk artifact.
 - **Real end-to-end run (`add_reference` on the fixture) passed and mostly looks right**: 2 swings
-  detected, both `mode="shadow"` (consistent with Task 5's low shuttle recall on this footage),
-  `elbow_angle_contact` ≈ 146° (plausible — coaching sources say ~150-170° at contact for a clear, close
-  enough given amateur/demo footage and pre-Task-11 uncalibrated thresholds). Visually confirmed one
-  detected swing (frame 95, the session's peak racket speed, 85.9 torso-lengths/s) against a re-extracted
-  video frame: it shows a real contact/follow-through-looking moment — good sign the pipeline is finding
-  real swings, not just noise.
+  detected, both `mode="shadow"` (consistent with Task 5's low shuttle recall on this footage). Swing 1
+  (contact frame 95, peak racket speed 85.9 torso-lengths/s) was visually confirmed against a
+  re-extracted video frame as a real contact/follow-through-looking moment, and its metrics are
+  sensible: `contact_height_vs_nose` ≈ +0.03 (essentially level with the nose — plausible), `contact_forward`
+  ≈ +2.0 torso-lengths (correctly signed toward the net), `racket_shaft_angle_contact` ≈ -6° (near
+  vertical, as expected for a clear), `elbow_angle_contact` ≈ 130° (more bent than the "150–170°"
+  coaching-literature ideal — plausibly genuine technique feedback rather than measurement error, but not
+  independently confirmed). Swing 0's metrics are **not representative** — see the false-positive note
+  below — don't read numbers off it.
 - **Calibration finding for Task 11**: the *other* detected swing (frame 25) is a false positive — a
   visual check shows both players still in a split-step ready stance, rackets low, no swing happening.
   The racket's coupled motion during that foot-plant crossed the speed-peak prominence threshold
