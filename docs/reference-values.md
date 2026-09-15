@@ -90,3 +90,32 @@ manual-check step is done.
   codebase; grepped the rest of the package to confirm no other stage had the same mistake.
 - Both bugs were caught before ever running against real data, by the unit tests written per the plan's
   own listed test scenarios — evidence those scenarios were worth specifying.
+
+## Task 7 — swing segmentation, metrics, reference comparison (2026-09-15)
+
+- Interpreted spec §3.4's "prep_end: racket top **lowest** y before contact" as *visually* lowest (i.e.
+  the **largest** y-pixel value — image y increases downward) rather than the numerically smallest y,
+  since the very next words are "i.e. the back-scratch": the back-scratch preparation position has the
+  racket head dropped down low behind the body, which is a large y, not a small one. Documented the
+  convention explicitly in `swings.py`'s module docstring so it isn't re-litigated later.
+- Found (via `test_segment_swings_stage_writes_and_caches`) and fixed a real cache-consistency bug: the
+  cached-skip branch of `segment_swings` returned a smaller summary dict (`{"n_swings"}` only) than the
+  freshly-computed branch (`{"n_swings", "n_live", "speed_source"}`) — a caller re-running against an
+  already-processed video would silently get a different-shaped result depending on whether the cache
+  hit. Added `speed_source` to `SwingsFile` itself (previously only recorded in `run.json`'s internal
+  stage bookkeeping) so the cached path reconstructs an identical summary from the on-disk artifact.
+- **Real end-to-end run (`add_reference` on the fixture) passed and mostly looks right**: 2 swings
+  detected, both `mode="shadow"` (consistent with Task 5's low shuttle recall on this footage),
+  `elbow_angle_contact` ≈ 146° (plausible — coaching sources say ~150-170° at contact for a clear, close
+  enough given amateur/demo footage and pre-Task-11 uncalibrated thresholds). Visually confirmed one
+  detected swing (frame 95, the session's peak racket speed, 85.9 torso-lengths/s) against a re-extracted
+  video frame: it shows a real contact/follow-through-looking moment — good sign the pipeline is finding
+  real swings, not just noise.
+- **Calibration finding for Task 11**: the *other* detected swing (frame 25) is a false positive — a
+  visual check shows both players still in a split-step ready stance, rackets low, no swing happening.
+  The racket's coupled motion during that foot-plant crossed the speed-peak prominence threshold
+  (`swing_speed_peak_prominence: float = 0.5`, an uncalibrated placeholder per its own docstring). Not
+  fixed now — it's explicitly a Task 11 concern once real footage is available — but a promising
+  direction if it recurs: require a minimum *absolute* peak speed in addition to prominence, and/or
+  cross-check against a large elbow-angle change over the same window (a real swing extends the arm; a
+  foot-plant jitter doesn't).
