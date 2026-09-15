@@ -78,6 +78,55 @@ def test_load_reference_metric_values_skips_missing_file(cfg: Config) -> None:
     assert values["elbow_angle_contact"] == [160.0]
 
 
+def _make_clip(path: Path, duration_s: float = 4.0) -> Path:
+    import subprocess
+
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc=size=320x240:rate=10:duration={duration_s}", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+def test_add_reference_retrims_when_window_changes_even_without_force(tmp_path: Path, cfg: Config, monkeypatch) -> None:
+    """Real bug found while picking a reference clip: `clip.mp4` was only regenerated when it didn't
+    exist yet or `force=True` was passed -- calling `reference add` again with a *different* --start/--end
+    (the normal way to fix a bad trim) silently kept reusing the stale first trim. `add_reference` should
+    detect the window changed and retrim on its own."""
+    from badminton_coach import metrics as metrics_mod
+    from badminton_coach import pipeline as pipeline_mod
+    from badminton_coach.reference import add_reference
+
+    calls: list[bool] = []
+
+    def fake_pipeline(*args, **kwargs) -> dict:  # noqa: ARG001
+        calls.append(kwargs["force"])
+        return {}
+
+    monkeypatch.setattr(pipeline_mod, "run_measurement_pipeline", fake_pipeline)
+    monkeypatch.setattr(metrics_mod, "compute_metrics_stage", lambda *args, **kwargs: {})  # noqa: ARG005
+
+    source = _make_clip(tmp_path / "src.mp4")
+
+    run1 = add_reference(str(source), "retrim-test", cfg=cfg, start_s=0.0, end_s=1.0)
+    clip_path = run1.root / "clip.mp4"
+    assert clip_path.exists()
+    mtime1 = clip_path.stat().st_mtime_ns
+    assert calls == [True]  # first-ever build: nothing to compare against, so it builds fresh
+
+    run2 = add_reference(str(source), "retrim-test", cfg=cfg, start_s=1.0, end_s=2.0)  # different window
+    mtime2 = clip_path.stat().st_mtime_ns
+    assert mtime2 != mtime1  # retrimmed, not silently reused
+    assert calls == [True, True]  # forced the pipeline rerun despite no explicit --force
+
+    run3 = add_reference(str(source), "retrim-test", cfg=cfg, start_s=1.0, end_s=2.0)  # same window again
+    mtime3 = clip_path.stat().st_mtime_ns
+    assert mtime3 == mtime2  # unchanged window: cached, not retrimmed
+    assert calls == [True, True, False]
+    assert run2.root == run3.root == run1.root
+
+
 @pytest.mark.models
 @pytest.mark.skipif(FIXTURE is None, reason="fixture not generated; run tests/fixtures/make_fixture.py")
 def test_add_reference_from_local_file_end_to_end(cfg: Config) -> None:

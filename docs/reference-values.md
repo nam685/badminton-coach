@@ -247,3 +247,70 @@ to the judge. Fixed:
   unknown-backend error path); 183 tests passing total, ruff clean. Not yet re-validated against a real
   judge run with real body3d data (the Task 8 real run skipped body3d for speed) — worth doing once real
   footage is available (Task 11).
+
+## Picking a real side-on reference clip (2026-09-15)
+
+Nam asked whether the two reference URLs named as *candidates* in the spec (§3, `2bK27mv1Fq4` and
+`5tG-krOy1ro`) were actually side-on, having watched them and thought they looked front-on. Checked by
+pulling real frames (not thumbnails) from both: **confirmed both are end-on/back-of-court views**, camera
+facing straight down the court toward the net — not side-on, despite the spec listing them as
+"candidates to verify (must be side-on)". Neither is usable as a reference for this system's 2D metrics,
+which are only geometrically meaningful with the camera roughly perpendicular to the swing plane. This
+also means `2bK27mv1Fq4` (used all session as the local test fixture) was never side-on either — the
+pipeline *code paths* it exercised are unaffected (tracking/segmentation don't care about camera angle),
+but the specific metric *values* quoted from it earlier in this doc (e.g. Task 7's elbow-angle numbers)
+aren't representative of genuinely side-on footage and shouldn't be read as calibration data.
+
+Searched for and verified two real side-on candidates by extracting actual frames (not thumbnails, which
+can be staged/misleading) across each video's duration:
+
+- **`S2brZPqx288`** (Howcast, "How to Hit a Forehand Overhead Clear"): cuts between several camera
+  angles: this side-on segment only from an old `--start 65.5 --end 71.0` trim (now `--start 68.0 --end
+  71.0`, four detected swings in the earlier wider window, two visually confirmed false positives —
+  same uncalibrated-`swing_speed_peak_prominence` issue as Task 7's finding; tightened the trim to isolate
+  just the one visually-confirmed clean contact). Added as reference `howcast-forehand-clear`.
+- **`zC9WvCrfxHc`** ("Badminton: Clear Vorhand (seitlich)", jugendundsport.ch — a Swiss youth-sport body):
+  genuinely side-on for its entire 20.5s duration, single fixed camera, plain dark background, no cuts —
+  a materially cleaner source than the Howcast clip. Added as reference `jugendsport-clear-seitlich`,
+  trimmed from `--start 1.0 --end 2.9` around one visually-confirmed clean contact (elbow_angle_contact
+  ≈ 177°, contact_height_vs_nose ≈ +0.27, peak_racket_speed ≈ 61 torso-lengths/s, net_side resolved via
+  the more reliable `"shuttle"` source rather than the `"racket_travel"` fallback — a side effect of the
+  tighter, less ambiguous window). The untrimmed 20.5s clip found **10** "swings" via the same
+  false-positive-prone segmentation (2 corroborating, ~5+ clear noise) — not fixed now, same documented
+  Task 11 concern, but concretely demonstrates why every reference needs this same visual-confirmation +
+  tight-trim treatment rather than trusting swing detection blindly on longer clips.
+
+**Two real bugs found and fixed while doing this, both in code that had never been exercised for real
+before now:**
+
+- **`reference.py`'s yt-dlp format selector could silently pick a broken AV1 stream.** The `zC9WvCrfxHc`
+  fetch first tried `bestvideo[height<=720][ext=mp4]/...`, which resolved to an av01 (AV1) stream that
+  decoded cleanly for isolated single-frame seeks (`ffmpeg -ss X -frames:v 1`, used for eyeballing
+  candidates) but produced **zero frames** through the pipeline's real sequential decode
+  (`ffmpeg: "Missing Sequence Header"`), because `[ext=mp4]` doesn't exclude AV1-in-mp4. This wasn't a
+  general "AV1 is broken here" problem — the *other* reference's source (`S2brZPqx288`) is also av01,
+  same resolution, and decodes perfectly — something about this specific stream/segment was corrupted or
+  malformed, not investigated further since forcing a known-reliable codec sidesteps the whole risk
+  class. Fixed by preferring `vcodec^=avc1` (H.264) explicitly in both `reference.py` and
+  `tests/fixtures/make_fixture.py`'s yt-dlp format strings, falling back to the old selector only if no
+  avc1 stream exists.
+- **The silent 0-frame decode cascaded into a confusing crash three stages later.** `measure_body()`
+  wrote an empty `body.npz` instead of raising, so `measure_racket`/`measure_shuttle` also silently ran
+  on nothing, and the actual failure only surfaced as `pandas.errors.EmptyDataError: No columns to parse
+  from file` inside `track()` reading an empty `shuttle.csv` — three stages and zero useful context away
+  from the real cause. Fixed: `measure_body()` now raises immediately with a clear message
+  ("decoded 0 frames... a likely cause: an AV1-encoded source...") the moment it detects a 0-frame decode,
+  matching this project's established pattern of failing loud and close to the cause rather than letting
+  garbage propagate.
+- **`add_reference()` silently reused a stale trim.** `clip.mp4` was only regenerated when it didn't
+  exist yet or `force=True` was passed — calling `reference add` again with a *different* `--start`/
+  `--end` (exactly what happened twice in this session, narrowing both reference clips' windows to cut
+  out false positives) silently kept the first trim's `clip.mp4` and reran the whole pipeline on stale
+  video. Also found in the same pass: the CLI's `reference add` had no `--force` flag at all, despite
+  `add_reference()` accepting one. Fixed: `add_reference()` now compares the new `start_s`/`end_s` against
+  what's stored in the run's own `run.json` from the previous call and retrims/reruns automatically on a
+  real change, independent of `force`; added the missing `--force` CLI flag for the genuine
+  re-fetch-from-scratch case.
+- 2 new tests (`test_measure_body_raises_clearly_on_zero_decoded_frames`,
+  `test_add_reference_retrims_when_window_changes_even_without_force`), 202 tests passing (full suite,
+  including real-model/GPU tests), ruff clean.

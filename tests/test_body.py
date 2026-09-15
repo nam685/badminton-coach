@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+import badminton_coach.measure.body as body_mod
 from badminton_coach.config import Config
 from badminton_coach.measure.body import measure_body
 from badminton_coach.measure.keypoints import BODY_NUM_KPTS, LEFT_WRIST, RIGHT_WRIST
@@ -13,6 +15,37 @@ from tests.fixtures.make_fixture import ensure_fixture
 
 FIXTURE = ensure_fixture()
 DEVICE = "cuda"
+
+
+def _make_clip(path: Path, duration_s: float = 0.5) -> Path:
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc=size=320x240:rate=10:duration={duration_s}", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+def test_measure_body_raises_clearly_on_zero_decoded_frames(tmp_path: Path, monkeypatch) -> None:
+    """Real bug found via a real reference-clip fetch: an av01 (AV1)-encoded source decoded 0 frames
+    through this stage's sequential ffmpeg pipe (silently -- no exception), which previously wrote an
+    empty body.npz and let 3 more pipeline stages run before track() crashed on an empty shuttle.csv
+    with a confusing pandas.errors.EmptyDataError three stages removed from the actual cause. This
+    should fail immediately and clearly, right here, instead."""
+
+    class FakeEstimator:
+        def __init__(self, **kwargs) -> None:  # noqa: ARG002
+            pass
+
+    monkeypatch.setattr(body_mod, "BodyEstimator", FakeEstimator)
+    monkeypatch.setattr(body_mod, "iter_frames", lambda *args, **kwargs: iter(()))  # noqa: ARG005
+
+    cfg = Config(data_dir=tmp_path / "data")
+    run = RunDir.create("nam", cfg=cfg)
+    clip = _make_clip(tmp_path / "clip.mp4")
+
+    with pytest.raises(RuntimeError, match="decoded 0 frames"):
+        measure_body(run, clip, cfg=cfg, device="cpu")
 
 
 @pytest.mark.models

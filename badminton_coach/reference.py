@@ -40,12 +40,20 @@ def add_reference(
 ) -> RunDir:
     """Fetch (yt-dlp) or copy a source clip, optionally trim to [start_s, end_s], and run the full
     measurement pipeline against it, writing under `data/references/<name>/`. Idempotent per stage
-    (re-running with the same source/trim reuses cached stage output, same as a player run)."""
+    (re-running with the same source/trim reuses cached stage output, same as a player run) — but a
+    *different* start_s/end_s than a previous call always retrims and reruns, even without `force`:
+    otherwise a stale `clip.mp4` from an earlier trim would silently be reused, ignoring the new window
+    entirely (found via a real re-trim while picking a reference clip — see docs/reference-values.md)."""
     from badminton_coach.pipeline import run_measurement_pipeline
 
     ref_dir = cfg.references_dir / _slugify(name)
     ref_dir.mkdir(parents=True, exist_ok=True)
     run = RunDir(ref_dir)
+
+    prior = run.load_run_json()
+    trim_changed = prior.get("start_s") != start_s or prior.get("end_s") != end_s
+    retrim = force or trim_changed  # a changed window must retrim/rerun even without an explicit force;
+    # re-fetching the source itself only needs the original `force` (the URL didn't change).
 
     source_path = ref_dir / "source_raw.mp4"
     if _is_url(url_or_file):
@@ -54,7 +62,15 @@ def add_reference(
                 [
                     "yt-dlp",
                     "-f",
-                    "bestvideo[height<=720][ext=mp4]/best[height<=720][ext=mp4]/best[height<=720]",
+                    # Prefer avc1 (H.264) explicitly. YouTube often also serves an av01 (AV1) stream at
+                    # the same resolution inside an mp4 container, which `[ext=mp4]` alone doesn't
+                    # exclude -- and a real run hit one that failed to decode ("Missing Sequence Header")
+                    # partway through, producing a *silent* 0-frame measure_body.npz (no error at
+                    # download or ingest time) that only surfaced as a confusing pandas crash three
+                    # stages later in track(). See docs/reference-values.md.
+                    "bestvideo[height<=720][vcodec^=avc1][ext=mp4]"
+                    "/best[height<=720][vcodec^=avc1][ext=mp4]"
+                    "/bestvideo[height<=720][ext=mp4]/best[height<=720][ext=mp4]/best[height<=720]",
                     "-o",
                     str(source_path),
                     url_or_file,
@@ -69,7 +85,7 @@ def add_reference(
 
     clip_path = ref_dir / "clip.mp4"
     if start_s is not None or end_s is not None:
-        if not clip_path.exists() or force:
+        if not clip_path.exists() or retrim:
             cmd = [cfg.ffmpeg_bin, "-y"]
             if start_s is not None:
                 cmd += ["-ss", _fmt_time(start_s)]
@@ -83,11 +99,11 @@ def add_reference(
     else:
         clip_input = source_path
 
-    summary = run_measurement_pipeline([clip_input], run, cfg=cfg, device=device, force=force)
+    summary = run_measurement_pipeline([clip_input], run, cfg=cfg, device=device, force=retrim)
 
     from badminton_coach.metrics import compute_metrics_stage
 
-    metrics_summary = compute_metrics_stage(run, cfg=cfg, references=[], force=force)
+    metrics_summary = compute_metrics_stage(run, cfg=cfg, references=[], force=retrim)
     summary["metrics"] = metrics_summary
 
     run.update_run_json(reference_name=name, source=url_or_file, start_s=start_s, end_s=end_s)

@@ -106,10 +106,13 @@ def reference() -> None:
 @click.option("--start", "start_s", type=float, default=None)
 @click.option("--end", "end_s", type=float, default=None)
 @click.option("--device", default="cuda")
-def reference_add(url_or_file: str, name: str, start_s: float | None, end_s: float | None, device: str) -> None:
+@click.option("--force", is_flag=True, help="re-fetch/re-trim/re-run even if cached output looks up to date")
+def reference_add(
+    url_or_file: str, name: str, start_s: float | None, end_s: float | None, device: str, force: bool
+) -> None:
     from badminton_coach.reference import add_reference
 
-    run = add_reference(url_or_file, name, cfg=CONFIG, start_s=start_s, end_s=end_s, device=device)
+    run = add_reference(url_or_file, name, cfg=CONFIG, start_s=start_s, end_s=end_s, device=device, force=force)
     click.echo(f"reference '{name}' built at {run.root}")
 
 

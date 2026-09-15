@@ -94,6 +94,18 @@ def measure_body(
         elapsed = time.monotonic() - started
         fps = n_frames_total / elapsed if elapsed > 0 else 0.0
 
+        if n_frames_total == 0:
+            # Fail loudly here, not several stages later: a real run hit an av01 (AV1)-encoded input
+            # that decoded fine for single-frame seeks but yielded nothing through this stage's
+            # sequential ffmpeg pipe ("Missing Sequence Header") -- silently writing an empty body.npz
+            # let 3 more stages run before track() crashed on an empty shuttle.csv with a confusing
+            # pandas.errors.EmptyDataError. See docs/reference-values.md.
+            raise RuntimeError(
+                f"measure_body decoded 0 frames from {normalized_video} -- the file exists but this "
+                "pipeline's ffmpeg frame-reader couldn't decode it (a likely cause: an AV1-encoded "
+                "source; re-fetch preferring avc1/H.264, see reference.py's yt-dlp format string)"
+            )
+
         max_persons = max((k.shape[0] for k in per_frame_kpts), default=0)
         max_persons = max(max_persons, 1)
 

@@ -45,7 +45,12 @@ def make_fixture(start_s: float = DEFAULT_START_S, duration_s: float = DEFAULT_D
             [
                 "yt-dlp",
                 "-f",
-                "bestvideo[height<=720][ext=mp4]/best[height<=720][ext=mp4]/best[height<=720]",
+                # Prefer avc1 (H.264) explicitly, not just any mp4 -- an av01 (AV1) stream inside an mp4
+                # container decoded cleanly for single-frame seeks but silently produced 0 frames when
+                # decoded sequentially by the real pipeline on this machine. See badminton_coach/reference.py.
+                "bestvideo[height<=720][vcodec^=avc1][ext=mp4]"
+                "/best[height<=720][vcodec^=avc1][ext=mp4]"
+                "/bestvideo[height<=720][ext=mp4]/best[height<=720][ext=mp4]/best[height<=720]",
                 "-o",
                 str(raw_path),
                 FIXTURE_URL,
