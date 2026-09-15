@@ -1,0 +1,23 @@
+{
+  "swing": "Schlag",
+  "contact": "Treffpunkt",
+  "prep": "Vorbereitung",
+  "follow": "Ausschwung",
+  "finding": "Befund",
+  "findings": "Befunde",
+  "strengths": "Stärken",
+  "drill": "Übung",
+  "cue": "Merksatz",
+  "evidence": "Beleg",
+  "metrics": "Messwerte",
+  "swings": "Schläge",
+  "judge_transcript": "Analyse-Protokoll",
+  "measurement_quality": "Messqualität",
+  "progress": "Fortschritt seit letztem Training",
+  "value": "Wert",
+  "reference": "Referenz",
+  "severity": "Schweregrad",
+  "pattern": "Häufigkeit",
+  "live": "mit Ball",
+  "shadow": "ohne Ball (Schattenschlag)"
+}

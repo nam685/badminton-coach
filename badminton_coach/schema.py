@@ -1,4 +1,6 @@
-"""Pydantic models for `swings/swings.json` and `metrics/metrics.json` (spec §3.4/§3.5)."""
+"""Pydantic models for `swings/swings.json`, `metrics/metrics.json` (spec §3.4/§3.5), and the judge's
+`findings.json` (spec §6.5 — mirrors `judge/schema.json`, the JSON Schema handed to `claude -p
+--json-schema`; keep the two in sync by hand, there are few enough fields that this is easy)."""
 
 from __future__ import annotations
 
@@ -59,3 +61,74 @@ class MetricsFile(BaseModel):
     shot: str = "clear"
     swings: list[SwingMetrics]
     cross_attempt_summary: dict[str, CrossAttemptStat] = {}
+
+
+# --- judge findings.json ---
+
+FindingCategory = Literal[
+    "contact_point",
+    "rotation_sequence",
+    "elbow",
+    "racket",
+    "non_racket_arm",
+    "footwork_weight_transfer",
+    "timing",
+    "follow_through",
+    "other",
+]
+
+
+class MeasurementQuality(BaseModel):
+    ok: bool
+    notes: str
+
+
+class SwingVerdict(BaseModel):
+    index: int
+    mode: Literal["live", "shadow"]
+    contact_frame: int
+    contact_time_s: float
+    one_line_verdict: str
+
+
+class EvidenceFrame(BaseModel):
+    swing: int
+    frame: int
+
+
+class EvidenceMetric(BaseModel):
+    name: str
+    value: float
+    reference: float | None = None
+
+
+class Evidence(BaseModel):
+    swings: list[int]
+    frames: list[EvidenceFrame]
+    metrics: list[EvidenceMetric]
+    visual: str
+
+
+class Finding(BaseModel):
+    id: str
+    title: str
+    category: FindingCategory
+    severity: Literal[1, 2, 3]
+    pattern: Literal["consistent", "inconsistent", "single"]
+    evidence: Evidence
+    explanation: str
+    cue: str
+    drill: str
+
+
+class FindingsFile(BaseModel):
+    player: str
+    shot: str
+    handedness: Literal["left", "right"]
+    measurement_quality: MeasurementQuality
+    swings: list[SwingVerdict]
+    strengths: list[str]
+    findings: list[Finding]
+    priority: list[str]
+    progress_vs_history: str | None = None
+    confidence: Literal["low", "medium", "high"]

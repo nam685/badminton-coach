@@ -6,8 +6,22 @@ Player selection score per frame (spec: "bbox area × proximity to the racket ha
 previous frame's choice"), each factor normalized to roughly [0, 1] so the product is well-behaved:
   - normalized bbox area (derived from the keypoint bounding box — rtmlib's high-level API doesn't
     expose the detector's own box) relative to the largest person that frame
-  - closeness to the nearest racket handle that frame (neutral 0.5 if no racket detected)
-  - IoU with the previous frame's chosen bbox (neutral 0.5 for the first frame / right after a gap)
+  - closeness to the nearest racket handle that frame (neutral 0.5 if no racket detected), boosted by
+    that racket's own frame-to-frame motion — added after a real judge run caught the selector locking
+    onto a bystander who was calmly *holding* a racket near a similarly-sized swinger (see
+    docs/judge-eval-template.md's 2026-09-15 entry): proximity alone can't distinguish "holding" from
+    "swinging", but motion can.
+  - IoU with the previous frame's chosen bbox (neutral 0.5 for the first frame / right after a gap),
+    with a relaxed floor when the racket signal above is decisive, so a strong sustained motion signal
+    can override a bad early lock-in instead of "stickiness" keeping it forever
+  - a final majority-vote pass (`_stabilize_selection`) cleans up isolated single-frame flips
+
+**Known limitation** (found on real footage, not fully solved): during the fastest part of a swing, a
+short run of frames (not just one) can still pick the wrong person before the signal above recovers —
+greedy frame-by-frame scoring with a local stabilization pass isn't a full multi-object tracker. Good
+enough to turn "wrong person for the whole swing" into "wrong person for a handful of frames near the
+peak" in the one real case tested; likely worth revisiting with more real footage in Task 11 if it
+recurs.
 """
 
 from __future__ import annotations
@@ -84,11 +98,42 @@ class SelectionResult:
     scores: list[dict]  # per-frame debug info
 
 
+def _racket_top_speeds(racket_kpts: np.ndarray, t: int, kpt_conf_thr: float) -> dict[int, float]:
+    """{racket_index: px moved by its top point since frame t-1}, 0.0 for t==0 or no match found in the
+    previous frame (matched by nearest racket-top position — a light heuristic, not full identity
+    tracking, but good enough to tell "this racket just moved a lot" from "this racket has been still").
+    """
+    n_racket = racket_kpts.shape[1]
+    speeds: dict[int, float] = {}
+    if t == 0:
+        return speeds
+    prev_tops = [
+        (r2, racket_kpts[t - 1, r2, RACKET_TOP, 0:2])
+        for r2 in range(n_racket)
+        if racket_kpts[t - 1, r2, RACKET_TOP, 2] > kpt_conf_thr
+    ]
+    if not prev_tops:
+        return speeds
+    for r in range(n_racket):
+        if racket_kpts[t, r, RACKET_TOP, 2] <= kpt_conf_thr:
+            continue
+        top = racket_kpts[t, r, RACKET_TOP, 0:2]
+        best_dist = min(np.linalg.norm(top - prev_top) for _, prev_top in prev_tops)
+        speeds[r] = float(best_dist)
+    return speeds
+
+
 def select_player(
     body_kpts: np.ndarray,  # [T, P, 26, 3]
     racket_kpts: np.ndarray,  # [T, R, 5, 3]
     kpt_conf_thr: float,
 ) -> SelectionResult:
+    """Player selection score per frame: normalized bbox area x racket-holding gate x racket-motion
+    boost x continuity with the previous frame's choice (spec §3.3's factors, plus racket motion — see
+    module docstring's note on why area/proximity alone aren't enough when a bystander is also holding a
+    racket, e.g. a partner standing still nearby: someone calmly *holding* a racket scores the same as
+    someone *swinging* one under proximity alone, so a fast-moving racket additionally boosts its
+    holder's score, and a static one doesn't)."""
     n_frames, max_persons = body_kpts.shape[0], body_kpts.shape[1]
     chosen = np.full(n_frames, -1, dtype=np.int64)
     debug: list[dict] = []
@@ -99,7 +144,8 @@ def select_player(
         racket_handles = []
         for r in range(n_racket):
             if racket_kpts[t, r, RACKET_HANDLE, 2] > kpt_conf_thr:
-                racket_handles.append(racket_kpts[t, r, RACKET_HANDLE, 0:2])
+                racket_handles.append((r, racket_kpts[t, r, RACKET_HANDLE, 0:2]))
+        racket_speeds = _racket_top_speeds(racket_kpts, t, kpt_conf_thr)
 
         candidates = []
         for p in range(max_persons):
@@ -127,7 +173,9 @@ def select_player(
             if racket_handles:
                 torso = _torso_length(xy, sc, kpt_conf_thr) or 100.0
                 wrists = [xy[LEFT_WRIST], xy[RIGHT_WRIST]]
-                min_dist = min(np.linalg.norm(w - h) for w in wrists for h in racket_handles)
+                nearest_r, min_dist = min(
+                    ((r, np.linalg.norm(w - h)) for w in wrists for r, h in racket_handles), key=lambda x: x[1]
+                )
                 # A person either is or isn't holding the visible racket — use a steep gate rather than
                 # a smooth 1/(1+d) falloff, which (normalized by each candidate's *own* torso length)
                 # otherwise lets a large/close-to-camera background person "win" on area alone even when
@@ -135,12 +183,23 @@ def select_player(
                 # relative distance-in-torso-lengths to *any* racket, including one that isn't theirs.
                 ratio = min_dist / max(torso, 1e-6)
                 racket_score = 1.0 if ratio < 1.5 else (0.3 if ratio < 3.0 else 0.02)
+                # Boost by how fast *that* racket is moving: a calmly-held, static racket scores the
+                # same on proximity alone as one mid-swing, which is exactly the failure mode that
+                # let a stationary bystander with their own racket outscore the actual swinger.
+                speed_norm = racket_speeds.get(nearest_r, 0.0) / max(torso, 1e-6)
+                racket_score *= 0.4 + min(speed_norm, 1.2)
             else:
                 racket_score = 0.5
 
             continuity_score = _iou(bbox, prev_bbox) if prev_bbox is not None else 0.5
-            if prev_bbox is not None and continuity_score == 0.0:
-                continuity_score = 0.1  # small nonzero floor so area/racket signal isn't fully zeroed
+            # Floor continuity rather than let it hit exactly 0 on a switch — but the floor itself scales
+            # with how decisive the racket signal is: a *clearly, actively swinging* candidate (high
+            # racket_score, which now includes the motion boost above) should be able to override a
+            # previous pick that was only ever a coin-flip at frame 0 (before any motion data existed),
+            # instead of "stickiness" permanently locking in whoever won that first ambiguous frame.
+            continuity_floor = 0.7 if racket_score > 0.8 else 0.1
+            if prev_bbox is not None:
+                continuity_score = max(continuity_score, continuity_floor)
 
             score = norm_area * racket_score * max(continuity_score, 0.1)
             frame_debug.append({"person": p, "score": round(float(score), 4)})
@@ -151,7 +210,32 @@ def select_player(
         prev_bbox = best_bbox
         debug.append({"frame": t, "chosen": int(best_p), "n_candidates": len(candidates), "scores": frame_debug})
 
-    return SelectionResult(chosen=chosen, scores=debug)
+    return SelectionResult(chosen=_stabilize_selection(chosen), scores=debug)
+
+
+def _stabilize_selection(chosen: np.ndarray, window: int = 5) -> np.ndarray:
+    """Cleans up isolated single-frame flips (e.g. `..., 1, 1, 0, 1, 1, ...`) that survive the per-frame
+    scoring even after the racket-motion/continuity improvements above — a brief tie or noisy frame can
+    still flip the winner for one frame in the middle of an otherwise-consistent run. Replaces each
+    frame's choice with the mode of a `window`-frame neighborhood (ties keep the original value); frames
+    with no detection (-1) are left alone and excluded from neighbors' mode counts."""
+    n = len(chosen)
+    out = chosen.copy()
+    half = window // 2
+    for t in range(n):
+        if chosen[t] == -1:
+            continue
+        lo, hi = max(0, t - half), min(n, t + half + 1)
+        neighborhood = [v for v in chosen[lo:hi] if v != -1]
+        if not neighborhood:
+            continue
+        values, counts = np.unique(neighborhood, return_counts=True)
+        best = values[np.argmax(counts)]
+        max_count = counts.max()
+        # only override on a clear majority (not a tie) so we don't fight a real, sustained handoff
+        if best != chosen[t] and np.sum(counts == max_count) == 1:
+            out[t] = best
+    return out
 
 
 # --- racket association / handedness ---

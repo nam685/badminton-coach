@@ -1,0 +1,110 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["player", "shot", "handedness", "measurement_quality", "swings", "strengths", "findings", "priority", "confidence"],
+  "properties": {
+    "player": { "type": "string" },
+    "shot": { "type": "string" },
+    "handedness": { "type": "string", "enum": ["left", "right"] },
+    "measurement_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "notes"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "notes": { "type": "string" }
+      }
+    },
+    "swings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "mode", "contact_frame", "contact_time_s", "one_line_verdict"],
+        "properties": {
+          "index": { "type": "integer" },
+          "mode": { "type": "string", "enum": ["live", "shadow"] },
+          "contact_frame": { "type": "integer" },
+          "contact_time_s": { "type": "number" },
+          "one_line_verdict": { "type": "string" }
+        }
+      }
+    },
+    "strengths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "category", "severity", "pattern", "evidence", "explanation", "cue", "drill"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "category": {
+            "type": "string",
+            "enum": [
+              "contact_point",
+              "rotation_sequence",
+              "elbow",
+              "racket",
+              "non_racket_arm",
+              "footwork_weight_transfer",
+              "timing",
+              "follow_through",
+              "other"
+            ]
+          },
+          "severity": { "type": "integer", "enum": [1, 2, 3] },
+          "pattern": { "type": "string", "enum": ["consistent", "inconsistent", "single"] },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["swings", "frames", "metrics", "visual"],
+            "properties": {
+              "swings": { "type": "array", "items": { "type": "integer" } },
+              "frames": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["swing", "frame"],
+                  "properties": {
+                    "swing": { "type": "integer" },
+                    "frame": { "type": "integer" }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "value"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "value": { "type": "number" },
+                    "reference": { "type": "number" }
+                  }
+                }
+              },
+              "visual": { "type": "string" }
+            }
+          },
+          "explanation": { "type": "string" },
+          "cue": { "type": "string" },
+          "drill": { "type": "string" }
+        }
+      }
+    },
+    "priority": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "progress_vs_history": { "type": ["string", "null"] },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] }
+  }
+}

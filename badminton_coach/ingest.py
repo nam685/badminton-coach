@@ -78,6 +78,11 @@ def ingest(inputs: list[str | Path], run: RunDir, cfg: Config = CONFIG, force: b
     if not inputs:
         raise ValueError("ingest requires at least one input video")
 
+    # Resolve to absolute paths before anything gets persisted: a relative path is only valid from the
+    # cwd it was given in, but `normalized_path` ends up read back later from very different cwds (the
+    # judge's workspace directory, `badminton-coach frames` invoked from anywhere, etc.) — found via a
+    # real judge run whose `frames` tool call failed with "could not open video" for exactly this reason.
+    inputs = [Path(p).resolve() for p in inputs]
     infos = [probe(p, cfg.ffprobe_bin) for p in inputs]
     input_hash = _combined_input_hash(infos)
 

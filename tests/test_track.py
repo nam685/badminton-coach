@@ -72,6 +72,33 @@ def test_select_player_background_person_wins_when_holding_the_racket() -> None:
     assert (result.chosen == 0).all()
 
 
+def test_select_player_prefers_swinging_racket_over_static_one() -> None:
+    """Real bug found via the actual judge run on the fixture (2026-09-15): a bystander calmly holding
+    their own racket, similar distance/size, out-scored the real swinger on proximity+area alone since a
+    held-but-still racket looks identical to a mid-swing one under distance-only scoring. Person 0 is
+    static (holding a racket at their side, larger/closer bbox); person 1's racket moves a lot each
+    frame (swinging)."""
+    n_frames = 5
+    body = np.full((n_frames, 2, BODY_NUM_KPTS, 3), np.nan, dtype=np.float32)
+    racket = np.full((n_frames, 2, RACKET_NUM_KPTS, 3), np.nan, dtype=np.float32)
+    for t in range(n_frames):
+        body[t, 0] = _make_person(cx=300, cy=300, scale=160)  # bigger/closer, but just standing still
+        body[t, 1] = _make_person(cx=700, cy=320, scale=140)  # smaller/farther, actually swinging
+        # person 0's racket sits still at their right wrist every frame
+        rw0 = body[t, 0, RIGHT_WRIST, 0:2]
+        racket[t, 0, RACKET_HANDLE] = [*rw0, 0.9]
+        racket[t, 0, RACKET_TOP] = [rw0[0], rw0[1] - 50, 0.9]
+        # person 1's racket sweeps a wide arc near their wrist frame to frame (a real swing)
+        rw1 = body[t, 1, RIGHT_WRIST, 0:2]
+        sweep_x = rw1[0] + 80 * t
+        racket[t, 1, RACKET_HANDLE] = [rw1[0], rw1[1], 0.9]
+        racket[t, 1, RACKET_TOP] = [sweep_x, rw1[1] - 60, 0.9]
+
+    result = select_player(body, racket, kpt_conf_thr=0.3)
+    # give it a frame to pick up the motion signal (t=0 has no previous frame to compare against)
+    assert (result.chosen[1:] == 1).all(), result.scores
+
+
 def test_select_player_no_candidates_returns_minus_one() -> None:
     body = np.full((2, 1, BODY_NUM_KPTS, 3), np.nan, dtype=np.float32)
     racket = np.full((2, 1, RACKET_NUM_KPTS, 3), np.nan, dtype=np.float32)

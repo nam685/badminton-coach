@@ -38,6 +38,22 @@ def test_ingest_single_no_rotation_is_passthrough(tmp_path: Path, cfg: Config) -
     assert run.load_run_json()["ingest"]["normalized_path"] == str(clip)
 
 
+def test_ingest_stores_absolute_path_even_when_given_relative(tmp_path: Path, cfg: Config, monkeypatch) -> None:
+    """Real bug found via a live judge run: a relative input path got persisted as-is, so
+    `normalized_path` only resolved from the cwd `ingest()` happened to run in — broke `badminton-coach
+    frames` when invoked (as the judge does) from a completely different cwd."""
+    clip = _make_clip(tmp_path / "clip.mp4", duration_s=0.5, fps=10)
+    monkeypatch.chdir(tmp_path)
+    run = RunDir.create("nam", cfg=cfg)
+
+    result = ingest(["clip.mp4"], run, cfg=cfg)  # relative to the cwd we just chdir'd into
+
+    assert Path(result.normalized_path).is_absolute()
+    assert Path(result.normalized_path) == clip.resolve()
+    stored = run.load_run_json()["ingest"]["normalized_path"]
+    assert Path(stored).is_absolute()
+
+
 def test_ingest_single_with_rotation_normalizes(tmp_path: Path, cfg: Config, monkeypatch) -> None:
     # This ffmpeg build doesn't honor `-metadata:s:v:0 rotate=N` for mp4 muxing (verified separately;
     # see tests/test_video.py), so we can't produce a real rotation-tagged input file. Instead, patch

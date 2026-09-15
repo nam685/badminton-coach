@@ -1,0 +1,23 @@
+{
+  "swing": "swing",
+  "contact": "contact",
+  "prep": "prep",
+  "follow": "follow",
+  "finding": "Finding",
+  "findings": "Findings",
+  "strengths": "Strengths",
+  "drill": "Drill",
+  "cue": "Cue",
+  "evidence": "Evidence",
+  "metrics": "Metrics",
+  "swings": "Swings",
+  "judge_transcript": "Judge transcript",
+  "measurement_quality": "Measurement quality",
+  "progress": "Progress since last session",
+  "value": "Value",
+  "reference": "Reference",
+  "severity": "Severity",
+  "pattern": "Pattern",
+  "live": "live",
+  "shadow": "shadow (no shuttle)"
+}
