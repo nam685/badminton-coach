@@ -27,6 +27,24 @@ Claude judge it (`claude -p` agent in a per-run workspace), render an annotated 
   you have any — several real bugs (wrong-player tracking, relative-path persistence) were only caught
   by an actual judge run, not by unit tests on synthetic data. See `docs/judge-eval-template.md`.
 
+## Commands (as built — Task 10)
+```
+badminton-coach analyze <video...> --player nam --lang vi|de|en [--shot clear] [--net-side auto|left|right]
+                                   [--refs all|none|name1,name2] [--model opus] [--effort high]
+                                   [--from-stage <stage>] [--no-judge] [--skip-body3d] [--skip-shuttle]
+badminton-coach judge <run-dir> [--lang ...] [--refs ...] [--model ...] [--effort ...]   # always forces a fresh judge call
+badminton-coach render <run-dir> [--lang ...]              # re-render only, no new judge call
+badminton-coach reference add <url|file> --name viktor-2018 [--start 0:12 --end 0:20]
+badminton-coach reference list
+badminton-coach frames <workspace> --swing 2 --from 0.40 --to 0.55 --step 1 [--crop upper]   # judge's own tool
+badminton-coach view [--port 8765]
+badminton-coach models download    # rtmlib + RacketVision (git clone + HF checkpoints) + SAM 3D Body (gated HF)
+```
+`--from-stage` (see `STAGE_ORDER` in `cli.py`) forces recompute from that stage onward; earlier stages
+still use their on-disk cache. `run_measurement_pipeline()` (`pipeline.py`) only takes one `force` flag
+for its whole span (ingest..swings), so `analyze` forces that whole span whenever `--from-stage` names
+anything inside it.
+
 ## Rule of thumb
 - At every step, if difficulty or approach is uncertain, first ask "has someone already solved this?" — search
   before building; prefer maintained existing solutions. See **Prior art** notes in the plan.

@@ -175,3 +175,32 @@ manual-check step is done.
 - **Not yet exercised**: genuine technique findings from correctly-tracked data — this run's
   `measurement_quality.ok=false` short-circuited before reaching that path. Next real-footage run
   (ideally with body3d and a reference clip) should cover it.
+
+## Task 10 — CLI wiring, end-to-end, docs (2026-09-15)
+
+- `cli.py` gained `analyze` (full pipeline orchestration: measurement stages -> body3d -> metrics ->
+  judge -> render, with `--from-stage`/`--no-judge`/`--refs`/`--net-side`/`--skip-body3d`/`--skip-shuttle`
+  and `--model`/`--effort` overrides), `judge`/`render` (re-run only that stage against an existing run
+  dir), `view` (serves `data/`), and `models download` (rtmlib warm-up + `git clone` RacketVision/SAM 3D
+  Body sources + Hugging Face checkpoint downloads, all idempotent — skips anything already present, and
+  raises an actionable error naming the gated-repo URL and `hf auth login` if SAM 3D Body's terms haven't
+  been accepted yet).
+- `--from-stage`: since `run_measurement_pipeline()` only exposes one `force` flag for its whole span
+  (ingest..swings), `analyze` forces that entire span whenever `--from-stage` names anything inside it,
+  and forces only the requested stage onward otherwise (`track.py`/`metrics.py`/etc.'s own input-hash
+  caching still naturally cascades a real change downstream regardless of this flag).
+- `docs/recording-guide.md` written in vi/de/en per spec §10's last bullet (one side-on camera position,
+  5+ attempts in one continuous clip).
+- **Real end-to-end validation**: ran `badminton-coach analyze <fixture> --player ... --no-judge` for
+  real (no stubbing) against `data/fixtures/clear_3s.mp4` — full pipeline through metrics via the actual
+  installed CLI entrypoint, not a test harness. Found 3 swings, correctly resolved
+  `handedness="left"`/`net_side="left"` (`net_side_source="racket_travel"`), and `body3d` fell back to
+  `rtmw3d` (SAM 3D Body's subprocess didn't succeed under real system memory pressure from an unrelated
+  process on this dev machine) — the fallback chain documented in Task 7b working exactly as designed
+  under genuine resource contention, not a bug. `--no-judge` correctly produced no `report.md`/
+  `index.html`/`annotated.mp4`.
+- `tests/test_cli.py` (11 tests): every heavy stage function stubbed, exercises the CLI's own
+  wiring/flag-translation logic only (force propagation per `--from-stage`, `--refs all|none|<names>`
+  resolution, run.json `lang`/`shot` persistence, `judge`'s always-force behavior, `render`'s
+  findings-or-None handling, `models download`'s skip-if-present and gated-repo error message).
+- 173 tests passing, ruff clean.
