@@ -2,17 +2,20 @@
 
 You are given measurements from a **side-on 2D camera**. Elbow angle, contact height/forwardness,
 racket shaft angle, and timing are direct 2D image-plane measurements and reliable. Shoulder/hip
-**rotation, X-factor, and the hip→shoulder→racket sequence come from monocular 3D** estimation
-(`body3d` fields in `metrics.json`) — good enough to say "the hips turned about 60°" or "hips turned
-before the shoulders", not precise enough for ±5° claims. Always quote 3D rotation numbers as
-approximate, and prefer citing the reference clips' numbers over a specific claimed target. If a swing's
-`body3d` fields are all `null` (check `measurement_quality` and each swing's evidence), fall back to the
-2D `shoulder_width_ratio`/`hip_width_ratio` proxy and say "appears" rather than stating a degree value.
+**rotation, X-factor, and the hip→shoulder→racket sequence come from monocular 3D** estimation —
+`shoulder_rotation_deg_prep_end`/`_contact`, `hip_rotation_deg_prep_end`/`_contact`,
+`x_factor_deg_prep_end`/`_contact`, `trunk_lean_3d_deg_contact`, and `sequence_hip_ms`/
+`sequence_shoulder_ms`/`sequence_racket_ms` in each swing's `metrics` in `metrics.json` — good enough to
+say "the hips turned about 60°" or "hips turned before the shoulders", not precise enough for ±5° claims.
+Always quote 3D rotation numbers as approximate, and prefer citing the reference clips' numbers over a
+specific claimed target. If a swing has none of these fields at all (older run, or `--skip-body3d`) or
+they're all `null` (check `measurement_quality` and each swing's evidence), fall back to the 2D
+`shoulder_width_ratio`/`hip_width_ratio` proxy and say "appears" rather than stating a degree value.
 
 ## Preparation
 - Sideways stance to the net (small `shoulder_width_ratio` relative to a squared-up stance; in 3D,
-  `shoulder_rotation_deg` roughly 70–90°, hips somewhat less — a positive `x_factor_deg`, i.e. the trunk
-  coiled).
+  `shoulder_rotation_deg_prep_end` roughly 70–90°, `hip_rotation_deg_prep_end` somewhat less — a positive
+  `x_factor_deg_prep_end`, i.e. the trunk coiled).
 - Racket-arm elbow up and bent around 90°, racket head dropped behind the body ("back-scratch" position
   — this is `prep_end` in the metrics).
 - **Non-racket arm raised** toward the shuttle — used for balance, timing, and to help initiate rotation.
@@ -20,12 +23,16 @@ approximate, and prefer citing the reference clips' numbers over a specific clai
 
 ## Kinetic chain (legs → hips → trunk → shoulder → elbow → forearm pronation → contact)
 - The hips should start rotating first, the shoulders follow, the racket last — check
-  `sequence_ms` (`hip_ms < shoulder_ms < racket_ms`, each roughly 20–80ms apart is a good sign;
-  simultaneous or reversed suggests an arm-only swing with no rotational power).
+  `sequence_hip_ms`/`sequence_shoulder_ms`/`sequence_racket_ms` (`hip < shoulder < racket`, each roughly
+  20–80ms apart is a good sign; simultaneous or reversed suggests an arm-only swing with no rotational
+  power). These are timestamps in ms relative to the swing's preparation start, over the
+  prep_start→contact window.
 - The elbow stays back/bent while the trunk turns; it should not straighten and swing forward until the
-  trunk has already turned toward the net. If shoulders are already near-square (`shoulder_rotation_deg`
-  small) very early relative to contact, the player may be "arming" the shot.
-- By contact, shoulders should be close to square to the net (`shoulder_rotation_deg` roughly ≤ 20°).
+  trunk has already turned toward the net. If shoulders are already near-square
+  (`shoulder_rotation_deg_prep_end` small) very early relative to contact, the player may be "arming" the
+  shot.
+- By contact, shoulders should be close to square to the net (`shoulder_rotation_deg_contact` roughly
+  ≤ 20°).
 
 ## Contact
 - **High, above the head, and slightly in front** of the body: `contact_height_vs_nose` should be
@@ -51,8 +58,8 @@ approximate, and prefer citing the reference clips' numbers over a specific clai
 ## Common faults to look for
 - Contact behind the head or too low (`contact_height_vs_nose` ≤ 0, or `contact_forward` ≤ 0).
 - Elbow too bent or fully locked at contact.
-- No hip/trunk turn — facing the net throughout the swing (`shoulder_rotation_deg` stays low even at
-  `prep_end`, or `x_factor_deg` near zero).
+- No hip/trunk turn — facing the net throughout the swing (`shoulder_rotation_deg_prep_end` stays low, or
+  `x_factor_deg_prep_end`/`x_factor_deg_contact` near zero).
 - Reversed or collapsed kinetic sequence (racket peaks at or before the hip/shoulder rotation peaks).
 - Non-racket arm dropped or never raised (`non_racket_wrist_height_prep_end` at or below shoulder
   height).

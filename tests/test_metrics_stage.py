@@ -174,6 +174,86 @@ def test_compute_metrics_stage_is_cached(cfg: Config) -> None:
     assert run.stage_status("metrics") == status1
 
 
+def _write_body3d(run: RunDir, n: int = 20, backend: str = "sam3d_body") -> None:
+    """A minimal MHR70-shaped (or COCO-shaped for backend="rtmw3d") body3d/joints.npz covering every
+    frame, with a real (non-degenerate) shoulder/hip rotation at frames 8 (prep_end) and 10 (contact) so
+    compute_metrics_stage's 3D wiring has something concrete to assert on."""
+    from badminton_coach.metrics3d import _indices_for_backend
+
+    ls, rs, lh, rh = _indices_for_backend(backend)
+    j = max(ls, rs, lh, rh) + 1
+    joints = np.full((n, j, 3), np.nan)
+    for t in range(n):
+        joints[t, ls] = [-20, 100, 0]
+        joints[t, rs] = [20, 100, 0]
+        joints[t, lh] = [-15, 150, -30]  # rotated ~45deg off the net-facing shoulder line
+        joints[t, rh] = [15, 150, -60]
+    (run.root / "body3d").mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        run.root / "body3d" / "joints.npz",
+        frame_indices=np.arange(n, dtype=np.int64),
+        keypoints_3d=joints.astype(np.float32),
+        backend=backend,
+        consistency_frac=1.0,
+    )
+
+
+def test_compute_metrics_stage_includes_3d_rotation_when_body3d_present(cfg: Config) -> None:
+    run = RunDir.create("nam", cfg=cfg)
+    _write_track_and_swings(run)
+    _write_body3d(run)
+
+    compute_metrics_stage(run, cfg=cfg, references=[])
+    data = json.loads((run.root / "metrics" / "metrics.json").read_text())
+    metrics = data["swings"][0]["metrics"]
+
+    assert metrics["shoulder_rotation_deg_contact"]["value"] == pytest.approx(0.0, abs=1e-6)
+    assert metrics["hip_rotation_deg_contact"]["value"] is not None
+    assert metrics["x_factor_deg_contact"]["value"] is not None
+    assert "sequence_hip_ms" in metrics  # present (value may legitimately be null if no clear peak)
+
+
+def test_compute_metrics_stage_without_body3d_omits_3d_fields(cfg: Config) -> None:
+    run = RunDir.create("nam", cfg=cfg)
+    _write_track_and_swings(run)
+    # no body3d/joints.npz written at all -- e.g. --skip-body3d, or a run predating Task 7b
+
+    compute_metrics_stage(run, cfg=cfg, references=[])
+    data = json.loads((run.root / "metrics" / "metrics.json").read_text())
+    metrics = data["swings"][0]["metrics"]
+    assert "shoulder_rotation_deg_contact" not in metrics
+
+
+def test_compute_metrics_stage_body3d_backend_none_is_skipped(cfg: Config) -> None:
+    run = RunDir.create("nam", cfg=cfg)
+    _write_track_and_swings(run)
+    (run.root / "body3d").mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        run.root / "body3d" / "joints.npz",
+        frame_indices=np.zeros(0, dtype=np.int64),
+        keypoints_3d=np.zeros((0, 70, 3), dtype=np.float32),
+        backend="none",
+        consistency_frac=0.0,
+    )
+
+    compute_metrics_stage(run, cfg=cfg, references=[])  # must not raise
+    data = json.loads((run.root / "metrics" / "metrics.json").read_text())
+    assert "shoulder_rotation_deg_contact" not in data["swings"][0]["metrics"]
+
+
+def test_compute_metrics_stage_body3d_rtmw3d_backend_uses_coco_hip_indices(cfg: Config) -> None:
+    """Regression guard for the MHR70-vs-COCO hip index mix-up: if compute_metrics_stage ever passed
+    the wrong backend through, this would silently read wrist coordinates as hips instead."""
+    run = RunDir.create("nam", cfg=cfg)
+    _write_track_and_swings(run)
+    _write_body3d(run, backend="rtmw3d")
+
+    compute_metrics_stage(run, cfg=cfg, references=[])
+    data = json.loads((run.root / "metrics" / "metrics.json").read_text())
+    metrics = data["swings"][0]["metrics"]
+    assert metrics["hip_rotation_deg_contact"]["value"] is not None
+
+
 def test_compute_metrics_stage_with_reference(cfg: Config) -> None:
     ref_run = RunDir(cfg.references_dir / "test-ref")
     _write_track_and_swings(ref_run)

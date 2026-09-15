@@ -204,3 +204,46 @@ manual-check step is done.
   resolution, run.json `lang`/`shot` persistence, `judge`'s always-force behavior, `render`'s
   findings-or-None handling, `models download`'s skip-if-present and gated-repo error message).
 - 173 tests passing, ruff clean.
+
+## Fix: wire 3D hip/shoulder rotation metrics into metrics.json (2026-09-15)
+
+Auditing before closing out Task 10 surfaced a real, live gap: Task 7b built and unit-tested
+`metrics3d.py`'s rotation functions (`shoulder_rotation_deg`, `hip_rotation_deg`, `x_factor_deg`,
+`sequence_ms`, `trunk_lean_3d_deg`) and `judge/rubric.md` already told the judge to read
+`shoulder_rotation_deg`/`x_factor_deg`/`sequence_ms` out of `metrics.json` — but `compute_metrics_stage()`
+never actually called any of `metrics3d.py`'s functions, so those fields never existed in a real
+`metrics.json`. Hip/shoulder rotation is the one measurement the user explicitly asked to add ("hip/
+shoulder rotation is important, add it") and it was silently dead: computed by `body3d`, never delivered
+to the judge. Fixed:
+
+- `compute_metrics_stage()` (`metrics.py`) now loads `body3d/joints.npz` when present, densifies the
+  sparse per-window `keypoints_3d` array back to one row per video frame (NaN where uncovered), and — for
+  any backend other than `"none"` — merges each swing's `compute_swing_metrics_3d()` output into the same
+  flat metrics dict the 2D metrics already populate, so it gets identical reference-comparison and
+  cross-attempt-consistency treatment for free. Absent/`--skip-body3d`/`backend="none"` runs are
+  unaffected (the 3D keys simply don't appear, rather than erroring).
+- New `compute_swing_metrics_3d()` in `metrics3d.py`: per swing, evaluates shoulder/hip rotation and
+  X-factor at `prep_end` and `contact`, trunk lean at `contact`, and the hip→shoulder→racket kinetic
+  sequence timestamps over `[prep_start_frame, contact_frame]` — named `shoulder_rotation_deg_prep_end`/
+  `_contact`, `hip_rotation_deg_prep_end`/`_contact`, `x_factor_deg_prep_end`/`_contact`,
+  `trunk_lean_3d_deg_contact`, `sequence_hip_ms`/`sequence_shoulder_ms`/`sequence_racket_ms` — matching
+  `metrics.py`'s existing `_prep_end`/`_contact` naming convention instead of the rubric's looser bare
+  names, which were ambiguous about which instant they meant.
+- **Real bug found and fixed in the same pass, before it ever shipped data**: `body3d`'s two backends do
+  not share one joint layout. `backend="sam3d_body"` is MHR70 order (hips at indices 9/10).
+  `backend="rtmw3d"` (the documented GPU-failure fallback, `rtmlib.Wholebody3d`) is standard
+  COCO-WholeBody order, where indices 9/10 are *wrists*, not hips — real hips are at 11/12. Shoulders
+  happen to coincide at 5/6 in both layouts, which is exactly the kind of partial agreement that would
+  have let this slip through casual testing. Every `metrics3d.py` function that indexes hips/shoulders
+  now takes a `backend` argument and resolves indices via `_indices_for_backend()`; a swing measured
+  under the rtmw3d fallback would otherwise have silently reported wrist position as hip rotation. Caught
+  by writing the COCO-layout test fixture first and checking it actually disagreed with the MHR70 one at
+  the hip (`test_hip_rotation_mhr70_indices_wrong_for_rtmw3d_data`) before trusting the fix.
+- `judge/rubric.md` updated to name the exact `metrics.json` fields (was previously referencing a
+  bare `shoulder_rotation_deg`/`x_factor_deg`/`sequence_ms` that were never going to appear under those
+  names even after wiring, since real metrics need a `_prep_end`/`_contact` instant qualifier and
+  `sequence_ms` is three separate numbers, not one object).
+- 21 new tests (12 in `test_metrics3d.py`, 5 in `test_metrics_stage.py` end-to-end, plus coverage of the
+  unknown-backend error path); 183 tests passing total, ruff clean. Not yet re-validated against a real
+  judge run with real body3d data (the Task 8 real run skipped body3d for speed) — worth doing once real
+  footage is available (Task 11).

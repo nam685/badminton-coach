@@ -384,6 +384,7 @@ def compute_metrics_stage(
     import numpy as _np
 
     from badminton_coach.config import CONFIG as _CONFIG
+    from badminton_coach.metrics3d import compute_swing_metrics_3d
     from badminton_coach.reference import load_reference_metric_values
     from badminton_coach.schema import CrossAttemptStat, MetricsFile, MetricValue, Swing, SwingMetrics
 
@@ -404,6 +405,7 @@ def compute_metrics_stage(
 
     track_dir = run.root / "track"
     swings_dir = run.root / "swings"
+    body3d_path = run.root / "body3d" / "joints.npz"
 
     player_smooth = _np.load(track_dir / "player.npz")["smooth"]
     racket_smooth = _np.load(track_dir / "racket.npz")["smooth"]
@@ -416,9 +418,29 @@ def compute_metrics_stage(
     net_side = swings_data["net_side"]
     torso_len = track_json.get("torso_len_median_px") or 1.0
 
+    # 3D rotation metrics (Task 7b/§3.4b): optional -- absent for reference clips built before body3d
+    # existed, runs with --skip-body3d, or a total body3d failure (backend="none"). `dense_joints` is
+    # frame-indexed (NaN where body3d didn't cover that frame) so compute_swing_metrics_3d can index it
+    # the same way compute_swing_metrics indexes player_smooth/racket_smooth.
+    dense_joints_3d: _np.ndarray | None = None
+    body3d_backend = "sam3d_body"
+    if body3d_path.exists():
+        body3d_data = _np.load(body3d_path, allow_pickle=True)
+        body3d_backend = str(body3d_data["backend"])
+        kpts_3d = body3d_data["keypoints_3d"]
+        frame_indices = body3d_data["frame_indices"]
+        n_frames = player_smooth.shape[0]
+        dense_joints_3d = _np.full((n_frames, kpts_3d.shape[1], 3), _np.nan, dtype=_np.float32)
+        if len(frame_indices):
+            in_range = (frame_indices >= 0) & (frame_indices < n_frames)
+            dense_joints_3d[frame_indices[in_range]] = kpts_3d[in_range]
+
     h = hashlib.sha256()
     h.update(player_smooth.tobytes())
     h.update(racket_smooth.tobytes())
+    if dense_joints_3d is not None:
+        h.update(dense_joints_3d.tobytes())
+        h.update(body3d_backend.encode())
     h.update(str(sorted(r.root.name for r in references)).encode())
     input_hash = h.hexdigest()
 
@@ -436,6 +458,12 @@ def compute_metrics_stage(
             raw = compute_swing_metrics(
                 swing, player_smooth, racket_smooth, speed_series, torso_len, handedness, net_side, fps
             )
+            if dense_joints_3d is not None and body3d_backend in ("sam3d_body", "rtmw3d"):
+                raw.update(
+                    compute_swing_metrics_3d(
+                        swing, dense_joints_3d, body3d_backend, net_dir_sign(net_side), speed_series, fps
+                    )
+                )
             metric_values: dict[str, MetricValue] = {}
             for name, value in raw.items():
                 if isinstance(value, str) or isinstance(value, bool):

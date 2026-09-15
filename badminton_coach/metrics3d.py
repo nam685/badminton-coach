@@ -16,6 +16,13 @@ from `metrics.py` directly as the sign along camera-space X.
 
 **MHR70 joint indices** (verified against the cloned `sam-3d-body` source,
 `sam_3d_body/metadata/mhr70.py`): 5=left_shoulder, 6=right_shoulder, 9=left_hip, 10=right_hip.
+
+**Backend-dependent indices**: `body3d`'s two possible backends do NOT share one joint layout past the
+shoulders. `backend="sam3d_body"` is MHR70 order (hips at 9/10). `backend="rtmw3d"` (the fallback,
+`rtmlib.Wholebody3d`/RTMW3D-x) is standard COCO-WholeBody order — shoulders happen to also be at 5/6
+there, but **hips are at 11/12**, not 9/10 (9/10 are wrists in COCO order). Every function below that
+indexes hips/shoulders takes a `backend` argument and resolves indices via `_indices_for_backend` rather
+than assuming MHR70 — get this wrong and rtmw3d-fallback swings silently report wrist positions as hips.
 """
 
 from __future__ import annotations
@@ -28,6 +35,21 @@ MHR70_LEFT_SHOULDER = 5
 MHR70_RIGHT_SHOULDER = 6
 MHR70_LEFT_HIP = 9
 MHR70_RIGHT_HIP = 10
+
+# COCO-WholeBody order (rtmw3d fallback): body block is standard COCO-17.
+_COCO_LEFT_SHOULDER = 5
+_COCO_RIGHT_SHOULDER = 6
+_COCO_LEFT_HIP = 11
+_COCO_RIGHT_HIP = 12
+
+
+def _indices_for_backend(backend: str) -> tuple[int, int, int, int]:
+    """Returns (left_shoulder, right_shoulder, left_hip, right_hip) for the given `body3d` backend."""
+    if backend == "sam3d_body":
+        return MHR70_LEFT_SHOULDER, MHR70_RIGHT_SHOULDER, MHR70_LEFT_HIP, MHR70_RIGHT_HIP
+    if backend == "rtmw3d":
+        return _COCO_LEFT_SHOULDER, _COCO_RIGHT_SHOULDER, _COCO_LEFT_HIP, _COCO_RIGHT_HIP
+    raise ValueError(f"unknown body3d backend {backend!r} — add its joint layout to _indices_for_backend")
 
 
 def _valid3(p: np.ndarray) -> bool:
@@ -58,13 +80,15 @@ def horizontal_rotation_deg(left: np.ndarray, right: np.ndarray, net_dir_sign: f
     return min(ang, 180.0 - ang)
 
 
-def shoulder_rotation_deg(joints: np.ndarray, net_dir_sign: float) -> float | None:
-    """`joints`: [J, 3] (single frame, MHR70 order)."""
-    return horizontal_rotation_deg(joints[MHR70_LEFT_SHOULDER], joints[MHR70_RIGHT_SHOULDER], net_dir_sign)
+def shoulder_rotation_deg(joints: np.ndarray, net_dir_sign: float, backend: str = "sam3d_body") -> float | None:
+    """`joints`: [J, 3] (single frame, layout matching `backend`)."""
+    ls, rs, _, _ = _indices_for_backend(backend)
+    return horizontal_rotation_deg(joints[ls], joints[rs], net_dir_sign)
 
 
-def hip_rotation_deg(joints: np.ndarray, net_dir_sign: float) -> float | None:
-    return horizontal_rotation_deg(joints[MHR70_LEFT_HIP], joints[MHR70_RIGHT_HIP], net_dir_sign)
+def hip_rotation_deg(joints: np.ndarray, net_dir_sign: float, backend: str = "sam3d_body") -> float | None:
+    _, _, lh, rh = _indices_for_backend(backend)
+    return horizontal_rotation_deg(joints[lh], joints[rh], net_dir_sign)
 
 
 def x_factor_deg(shoulder_rot_deg: float | None, hip_rot_deg: float | None) -> float | None:
@@ -80,11 +104,12 @@ def rotation_series(
     joints_series: np.ndarray,  # [T, J, 3]
     net_dir_sign: float,
     which: str = "shoulder",
+    backend: str = "sam3d_body",
 ) -> np.ndarray:
     fn = shoulder_rotation_deg if which == "shoulder" else hip_rotation_deg
     out = np.full(len(joints_series), np.nan)
     for t in range(len(joints_series)):
-        val = fn(joints_series[t], net_dir_sign)
+        val = fn(joints_series[t], net_dir_sign, backend)
         out[t] = val if val is not None else np.nan
     return out
 
@@ -136,11 +161,12 @@ def sequence_ms(
     return {"hip_ms": to_ms(hip_t), "shoulder_ms": to_ms(shoulder_t), "racket_ms": to_ms(racket_t)}
 
 
-def trunk_lean_3d_deg(joints: np.ndarray) -> float | None:
+def trunk_lean_3d_deg(joints: np.ndarray, backend: str = "sam3d_body") -> float | None:
     """Angle (degrees) of the hip-mid -> shoulder-mid line from vertical (Y axis). 0 = perfectly
     upright. Unsigned (direction of lean isn't disambiguated in 3D without a second reference axis)."""
-    ls, rs = joints[MHR70_LEFT_SHOULDER], joints[MHR70_RIGHT_SHOULDER]
-    lh, rh = joints[MHR70_LEFT_HIP], joints[MHR70_RIGHT_HIP]
+    ls_i, rs_i, lh_i, rh_i = _indices_for_backend(backend)
+    ls, rs = joints[ls_i], joints[rs_i]
+    lh, rh = joints[lh_i], joints[rh_i]
     if not all(_valid3(p) for p in (ls, rs, lh, rh)):
         return None
     mid_shoulder = (ls[:3] + rs[:3]) / 2
@@ -152,3 +178,57 @@ def trunk_lean_3d_deg(joints: np.ndarray) -> float | None:
     up = np.array([0.0, -1.0, 0.0])  # Y increases downward — see module docstring
     cos_a = np.clip(np.dot(v, up) / n, -1.0, 1.0)
     return math.degrees(math.acos(cos_a))
+
+
+def compute_swing_metrics_3d(
+    swing: "Swing",  # noqa: F821 - avoid a hard import cycle; badminton_coach.schema.Swing at runtime
+    dense_joints: np.ndarray,  # [T, J, 3], NaN where body3d didn't cover that frame
+    backend: str,
+    net_dir_sign: float,
+    speed_series: np.ndarray,  # [T], torso-lengths/s (same series metrics.py uses for peak_racket_speed)
+    fps: float,
+) -> dict[str, float | None]:
+    """Flat dict of this swing's 3D rotation metrics (rubric §"kinetic chain"), named to match
+    `metrics.py`'s `_prep_end`/`_contact` convention so they merge into the same `metrics` dict as every
+    2D metric and get the same reference-comparison treatment. All `None` if `dense_joints` has no valid
+    data in this swing's window (e.g. `backend="none"`)."""
+    prep_end, contact = swing.prep_end_frame, swing.contact_frame
+
+    def at(frame: int | None) -> np.ndarray | None:
+        if frame is None or frame < 0 or frame >= len(dense_joints):
+            return None
+        return dense_joints[frame]
+
+    j_prep, j_contact = at(prep_end), at(contact)
+
+    shoulder_prep = shoulder_rotation_deg(j_prep, net_dir_sign, backend) if j_prep is not None else None
+    shoulder_contact = shoulder_rotation_deg(j_contact, net_dir_sign, backend) if j_contact is not None else None
+    hip_prep = hip_rotation_deg(j_prep, net_dir_sign, backend) if j_prep is not None else None
+    hip_contact = hip_rotation_deg(j_contact, net_dir_sign, backend) if j_contact is not None else None
+
+    out: dict[str, float | None] = {
+        "shoulder_rotation_deg_prep_end": shoulder_prep,
+        "shoulder_rotation_deg_contact": shoulder_contact,
+        "hip_rotation_deg_prep_end": hip_prep,
+        "hip_rotation_deg_contact": hip_contact,
+        "x_factor_deg_prep_end": x_factor_deg(shoulder_prep, hip_prep),
+        "x_factor_deg_contact": x_factor_deg(shoulder_contact, hip_contact),
+        "trunk_lean_3d_deg_contact": trunk_lean_3d_deg(j_contact, backend) if j_contact is not None else None,
+    }
+
+    window_lo, window_hi = swing.prep_start_frame, contact
+    if window_hi > window_lo:
+        hip_series = rotation_series(dense_joints[window_lo : window_hi + 1], net_dir_sign, "hip", backend)
+        shoulder_series = rotation_series(dense_joints[window_lo : window_hi + 1], net_dir_sign, "shoulder", backend)
+        seq = sequence_ms(
+            hip_series, shoulder_series, speed_series[window_lo : window_hi + 1], fps, 0, window_hi - window_lo
+        )
+        out["sequence_hip_ms"] = seq["hip_ms"]
+        out["sequence_shoulder_ms"] = seq["shoulder_ms"]
+        out["sequence_racket_ms"] = seq["racket_ms"]
+    else:
+        out["sequence_hip_ms"] = None
+        out["sequence_shoulder_ms"] = None
+        out["sequence_racket_ms"] = None
+
+    return out
