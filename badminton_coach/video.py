@@ -264,9 +264,7 @@ def read_frame(path: str | Path, index: int, scale_long_side: int | None = None)
         cap.release()
 
 
-def write_video(
-    frames: Iterator[np.ndarray], out_path: str | Path, fps: float, ffmpeg_bin: str | None = None
-) -> None:
+def write_video(frames: Iterator[np.ndarray], out_path: str | Path, fps: float, ffmpeg_bin: str | None = None) -> None:
     """Encode a stream of BGR frames to an h264/yuv420p mp4 via an ffmpeg pipe."""
     ffmpeg_bin = ffmpeg_bin or CONFIG.ffmpeg_bin
     out_path = Path(out_path)
@@ -304,13 +302,31 @@ def write_video(
         str(out_path),
     ]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    assert proc.stdin is not None
+    assert proc.stdin is not None and proc.stderr is not None
+
+    # Drain stderr on a background thread while we write frames on the main thread: ffmpeg's stderr
+    # pipe has a limited OS buffer, and stdin writes could otherwise deadlock once ffmpeg blocks trying
+    # to write a full stderr buffer while we're blocked writing a full stdin buffer.
+    stderr_chunks: list[bytes] = []
+
+    def _drain_stderr() -> None:
+        assert proc.stderr is not None
+        stderr_chunks.append(proc.stderr.read())
+
+    import threading
+
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    stderr_thread.start()
+
     try:
         proc.stdin.write(first.tobytes())
         for frame in frames:
             proc.stdin.write(frame.tobytes())
     finally:
         proc.stdin.close()
-        _, stderr = proc.communicate()
+
+    stderr_thread.join()
+    proc.wait()
     if proc.returncode != 0:
+        stderr = b"".join(stderr_chunks)
         raise RuntimeError(f"ffmpeg encode failed: {stderr.decode(errors='replace')[-1000:]}")
