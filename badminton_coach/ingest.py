@@ -1,5 +1,6 @@
-"""Stage 0 — ingest: turn one or more raw phone clips into a single rotation-corrected `normalized.mp4`
-plus `ingest.json` recording per-attempt facts (spec §3.1).
+"""Stage 0 — ingest: turn one or more raw phone clips into a single rotation-corrected `normalized.mp4`,
+recording per-attempt facts under `run.json`'s "ingest" key (spec §3.1's `ingest.json` naming, merged
+into run.json in practice rather than kept as a standalone file — see `RunDir.update_run_json`).
 
 Multiple input files are treated as multiple attempts of the same session: each is individually
 rotation-corrected and resampled to a common fps/resolution (the first input's, after rotation), then
@@ -72,8 +73,8 @@ def _combined_input_hash(infos: list[VideoInfo]) -> str:
 
 
 def ingest(inputs: list[str | Path], run: RunDir, cfg: Config = CONFIG, force: bool = False) -> IngestResult:
-    """Run the ingest stage, writing `<run>/ingest.json` and (when needed) `<run>/normalized.mp4` /
-    `<run>/ingest/attempt_<i>.mp4`. Idempotent/cached via `RunDir.stage`."""
+    """Run the ingest stage, recording results under run.json's "ingest" key and (when needed) writing
+    `<run>/normalized.mp4` / `<run>/ingest/attempt_<i>.mp4`. Idempotent/cached via `RunDir.stage`."""
     if not inputs:
         raise ValueError("ingest requires at least one input video")
 

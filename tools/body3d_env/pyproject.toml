@@ -1,0 +1,29 @@
+[project]
+name = "body3d-env"
+version = "0.1.0"
+description = "One-time-setup, real-inference env for SAM 3D Body (needs CUDA — process_one_image hardcodes .to('cuda'))."
+requires-python = "==3.11.*"
+dependencies = [
+    "torch",
+    "torchvision",
+    "pillow",
+    "braceexpand",
+    "opencv-python",
+    "einops",
+    "numpy",
+    "omegaconf",
+    "roma",
+    "timm",
+    "yacs",
+    "pytorch-lightning",
+    "huggingface-hub",
+    # torch.hub-downloaded DINOv3 backbone code (facebookresearch/dinov3) imports this at load time.
+    "termcolor",
+]
+
+# Deliberately does NOT install detectron2 (ViTDet detector), SAM2 (segmentor), or MoGe (FOV estimator):
+# sam_3d_body/__init__.py only imports SAM3DBodyEstimator/load_sam_3d_body[_hf], none of which pull in
+# sam_3d_body.visualization.* (where detectron2/pyrender/trimesh actually live) or the optional
+# detector/segmentor/fov modules — verified by grepping the cloned source. We pass our own player bbox
+# (from Task 6's tracking) instead of running a detector, and skip mask-conditioning (use_mask=False).
+# This sidesteps detectron2's well-known install pain entirely. See docs/body3d.md.

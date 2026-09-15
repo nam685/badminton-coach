@@ -67,6 +67,24 @@ manual-check step is done.
   (rather than per-clip) helps, but that's a tuning question, not a correctness one.
 - Unaffected: keypoint math, CSV schema, and caching all verified independently via unit tests + the
   real-checkpoint integration test.
+
+## Task 7b — 3D body (SAM 3D Body) + rotation metrics (2026-09-15)
+
+- Full story in `docs/body3d.md`. Summary: switched from the spec's assumed DINOv3-H+ checkpoint (840M
+  params, OOM-killed on this machine's 7.6GB RAM) to the ViT-H checkpoint (631M, same published
+  accuracy) loaded via `torch.load(..., mmap=True)` — fixed the OOM outright (0.3s load vs. killed).
+  fp16 doesn't work at all (`addmm_sparse_cuda` has no Half kernel) — runs fp32, which fits 4GB VRAM
+  fine in practice. No CPU path exists in the library (`process_one_image` hardcodes `.to("cuda")`), so
+  the real fallback chain is SAM 3D Body (GPU) -> RTMW3D, not "-> CPU ->" as originally planned.
+- Coordinate convention confirmed empirically against real output: Y increases **downward** (matching
+  2D image coordinates), not the Y-up convention originally assumed for SMPL-family models — fixed in
+  `metrics3d.trunk_lean_3d_deg` before it was ever wired into the pipeline.
+- The full pipeline's first end-to-end `estimate_3d()` run fell back to `backend="rtmw3d"` — traced to a
+  transient resource-contention failure in the SAM 3D Body subprocess (confirmed: the identical
+  subprocess call succeeds reliably in isolation) rather than a code bug. Found and fixed a real gap
+  along the way: the subprocess wrapper discarded stderr on failure, making this kind of fallback
+  silent; now writes a `*.subprocess_error.txt` with the cause.
+- 17 tests (metrics3d) + 12 tests (body3d) passing, ruff clean, plus a real end-to-end pipeline run.
 - **CPU fallback is genuinely slow in this environment**: ~200 frames took several minutes on CPU
   (vs. seconds on GPU) — plausibly WSL2 CPU-virtualization overhead, not investigated further since
   latency isn't a concern for the rare real fallback case. Kept the fixture-based integration test on

@@ -335,10 +335,17 @@ put a DB + web UI on top of exactly this layout (player = identified user, run =
 - **mmdeploy export** may fail on version drift → fallback subprocess in the pinned env (§3.2). Budget one task.
 - **Racket detection recall** on amateur phone footage (motion blur) — unknown; mitigations: 60 fps
   recording, gap interpolation, speed-based contact fallback, and the judge is told when racket data is thin.
-- **SAM 3D Body on 4 GB VRAM**: 840M params → fp16 mandatory; if it still OOMs, CPU (hours are acceptable)
-  or the RTMW3D fallback. Gated HF repo: Nam accepts the terms once and runs `hf auth login`. Per-image
-  model → our own temporal smoothing; monocular depth is prior-driven → rotation numbers are approximate,
-  the rubric says so.
+- **SAM 3D Body on 4 GB VRAM — corrected 2026-09-15 after real implementation** (see `docs/body3d.md` for
+  the full story): fp16 doesn't work at all (`addmm_sparse_cuda` has no Half implementation — crashes
+  deep inside the MHR pose-correctives model); runs fp32-only, which fits comfortably in 4GB VRAM in
+  practice. The real constraint on this dev machine turned out to be **system RAM** (7.6GB), not VRAM —
+  the 840M-param DINOv3-H+ checkpoint OOM-killed on load; switched to the 631M-param **ViT-H** checkpoint
+  (same published accuracy) and load it with `torch.load(..., mmap=True)`, which fixed it outright
+  (0.3s vs. OOM-killed). There is **no CPU path** — `SAM3DBodyEstimator.process_one_image` hardcodes
+  `.to("cuda")` internally regardless of the model's device, so the fallback chain is SAM 3D Body (GPU)
+  → RTMW3D (rtmlib, CPU/GPU), not "→ CPU → RTMW3D" as originally planned. Gated HF repo: accepted, both
+  checkpoints downloaded. Per-image model → our own temporal smoothing; monocular depth is prior-driven
+  → rotation numbers are approximate, the rubric says so.
 - **Shuttle tracking** on amateur footage may be poor → contact falls back to racket-speed peak.
 - **onnxruntime-gpu + cuDNN 9** on WSL2: install torch cu12 wheels and `import torch` before onnxruntime
   (or `onnxruntime.preload_dlls()`); document in README.
