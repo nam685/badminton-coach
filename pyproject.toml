@@ -1,0 +1,68 @@
+[project]
+name = "badminton-coach"
+version = "0.1.0"
+description = "Analyze a badminton stroke from phone video: specialist models measure, Claude judges."
+requires-python = ">=3.12"
+dependencies = [
+    "rtmlib>=0.0.13",
+    "onnxruntime-gpu>=1.19",
+    "torch>=2.4",
+    "torchvision>=0.19",
+    "opencv-python-headless>=4.10",
+    "numpy>=1.26,<2.0",
+    "scipy>=1.13",
+    "pandas>=2.2",
+    "mmengine>=0.10.7",
+    "huggingface-hub>=0.25",
+    "yt-dlp>=2024.8.6",
+    "click>=8.1",
+    "jinja2>=3.1",
+    "matplotlib>=3.9",
+    "pydantic>=2.8",
+    "pillow>=10.4",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+badminton-coach = "badminton_coach.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["badminton_coach"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "N", "ARG"]
+
+[tool.uv]
+# rtmlib depends on plain `onnxruntime` (CPU-only), which installs into the same importable
+# `onnxruntime` package/namespace as `onnxruntime-gpu` (a superset that also provides CPU support) —
+# having both resolved is a known conflict (file collisions in site-packages, nondeterministic which
+# wins). Override rtmlib's `onnxruntime` requirement to something unsatisfiable so only
+# `onnxruntime-gpu` is ever installed; `import onnxruntime` then resolves to the GPU-capable package.
+override-dependencies = ["onnxruntime; sys_platform == 'never'"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+markers = [
+    "models: requires downloaded models (skipped when data/models is absent)",
+]
+
+# GPU notes (verified 2026-09-15 on this machine, RTX 3050 Ti / driver 595.97 / WSL2): PyPI's default
+# `torch` wheel (2.14.0) resolves to a CUDA 13.0 build, and `onnxruntime-gpu` 1.30.0 also targets CUDA
+# 13.0 — no custom index/pin needed. `torch.cuda.is_available()` and onnxruntime's CUDAExecutionProvider
+# both work with the stock PyPI wheels. See README's GPU section for the onnxruntime/rtmlib conflict
+# this pyproject works around (below).
